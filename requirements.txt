@@ -1,0 +1,92 @@
+import os
+import time
+import math
+from pybit.unified_trading import HTTP
+from dotenv import load_dotenv
+
+load_dotenv()
+
+API_KEY = os.getenv("BYBIT_API_KEY")
+API_SECRET = os.getenv("BYBIT_API_SECRET")
+
+# AYARLAR - İSTEDİĞİN GİBİ DEĞİŞTİR
+SYMBOL = "ETHUSDT"
+GRID_COUNT = 10
+GRID_SPACING_PCT = 0.005 # %0.5 aralık
+ORDER_QTY_USDT = 10 # Her emir 10 USDT'lik
+LEVERAGE = 3
+
+client = HTTP(
+    testnet=False, # Gerçek para için False. Test için True yap
+    api_key=API_KEY,
+    api_secret=API_SECRET,
+)
+
+def set_leverage():
+    try:
+        client.set_leverage(
+            category="linear",
+            symbol=SYMBOL,
+            buyLeverage=str(LEVERAGE),
+            sellLeverage=str(LEVERAGE)
+        )
+        print(f"Kaldıraç {LEVERAGE}x ayarlandı")
+    except Exception as e:
+        print("Kaldıraç hatası:", e)
+
+def get_price():
+    ticker = client.get_tickers(category="linear", symbol=SYMBOL)
+    return float(ticker["result"]["list"][0]["lastPrice"])
+
+def place_grid_orders(mid_price):
+    print(f"Orta fiyat: {mid_price}")
+    
+    # Önceki emirleri iptal et
+    client.cancel_all_orders(category="linear", symbol=SYMBOL)
+    time.sleep(1)
+    
+    for i in range(1, GRID_COUNT + 1):
+        # Alış emirleri aşağı
+        buy_price = mid_price * (1 - GRID_SPACING_PCT * i)
+        buy_qty = ORDER_QTY_USDT / buy_price
+        client.place_order(
+            category="linear",
+            symbol=SYMBOL,
+            side="Buy",
+            orderType="Limit",
+            qty=round(buy_qty, 4),
+            price=round(buy_price, 2),
+            timeInForce="GTC"
+        )
+        print(f"Alış emri: {round(buy_price,2)} - {round(buy_qty,4)} ETH")
+        
+        # Satış emirleri yukarı
+        sell_price = mid_price * (1 + GRID_SPACING_PCT * i)
+        sell_qty = ORDER_QTY_USDT / sell_price
+        client.place_order(
+            category="linear",
+            symbol=SYMBOL,
+            side="Sell",
+            orderType="Limit",
+            qty=round(sell_qty, 4),
+            price=round(sell_price, 2),
+            timeInForce="GTC"
+        )
+        print(f"Satış emri: {round(sell_price,2)} - {round(sell_qty,4)} ETH")
+        
+        time.sleep(0.2)
+
+if __name__ == "__main__":
+    set_leverage()
+    price = get_price()
+    place_grid_orders(price)
+    print("Grid kuruldu. Bot çalışıyor...")
+    
+    # Fiyat %2 değişirse gridi yenile
+    while True:
+        time.sleep(60)
+        new_price = get_price()
+        if abs(new_price - price) / price > 0.02:
+            print("Fiyat çok değişti, grid yenileniyor")
+            price = new_price
+            place_grid_orders(price)
